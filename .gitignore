@@ -1,0 +1,50 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+.eggs/
+dist/
+build/
+sdist/
+wheel/
+*.egg-info/
+*.whl
+MANIFEST
+
+# Environments
+.venv/
+venv/
+env/
+ENV/
+*.env
+
+# PyInstaller
+#  Usually these files are built before PyInstaller builds the exe, so as to inject date/other infos into it.
+*.manifest
+*.spec
+
+# Testing
+*.log
+*.dat
+nosetests.xml
+coverage.xml
+*.dirstack
+.tox/
+
+# Editor-related files
+.vscode/
+*.swp
+*.swo
+*.idea/
+.project
+.pydevproject
+
+# System files
+.DS_Store
+
+# all files that are named with prefix 'credentials' with any extension and in any directory
+credentials.*
+token.*
+
