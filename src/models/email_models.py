@@ -1,6 +1,6 @@
 from datetime import datetime
 from pydantic import BaseModel
-from typing import List
+from typing import List, Dict
 from enum import Enum
 
 
@@ -11,12 +11,15 @@ class ResponseStatusEnum(str, Enum):
 
 class ChaseExpense(BaseModel):
     account: str
-    date: datetime
+    date: str
     merchant: str
-    amount: str
+    amount: float
 
 class ChaseExpenseResponse(BaseModel):
     status: ResponseStatusEnum
     message: str
     data: List[ChaseExpense]
 
+class ExpenseSummary(BaseModel):
+    total: float
+    monthly_breakdown: Dict[str, float]

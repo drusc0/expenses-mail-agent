@@ -1,21 +1,13 @@
 import os
 import base64
-import requests
-import google.auth
-import json
 from bs4 import BeautifulSoup
-from datetime import datetime
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-from pprint import pprint
+from typing import List
 
-from src.models.email_models import (
-    ChaseExpense,
-    ChaseExpenseResponse,
-    ResponseStatusEnum
-)
+from src.models.email_models import ChaseExpense
 
 
 # Define the scopes (permissions) needed
@@ -112,7 +104,7 @@ def parse_html_email(html_content: str) -> ChaseExpense:
         'account': '',
         'date': '',
         'merchant': '',
-        'amount': ''
+        'amount': 0.0
     }
 
     # Search for table rows, and extract the desired fields
@@ -125,30 +117,20 @@ def parse_html_email(html_content: str) -> ChaseExpense:
             if label.lower() in extracted_info:
                 extracted_info[label.lower()] = value
     
-    # Convert the date string to a datetime object.
-    # sample date format: 'Mar 2, 2025 at 1:03 AM ET'
-    if extracted_info['date']:
-        try:
-            extracted_info['date'] = datetime.strptime(extracted_info['date'], '%b %d, %Y at %I:%M %p ET')
-        except ValueError:
-            print(f"Date format error: {extracted_info['date']}")
-            extracted_info['date'] = datetime.now()  # Fallback to current date if parsing fails
+    if extracted_info['amount']:
+        # Remove the dollar sign and convert to float
+        extracted_info['amount'] = float(extracted_info['amount'].replace('$', '').replace(',', ''))
 
     return ChaseExpense(**extracted_info)
 
-
-def get_chase_expenses() -> ChaseExpenseResponse:
+def get_chase_expenses(_=None) -> List[ChaseExpense]:
     """Fetch Chase expenses from Gmail."""
     # Initialize the Gmail client
     print("Authenticating with Gmail API...")
     service = get_gmail_client()
     if not service:
         print("Failed to authenticate with Gmail API")
-        return ChaseExpenseResponse(
-            status=ResponseStatusEnum.FAILURE,
-            message="Failed to authenticate with Gmail API",
-            data=[]
-        )
+        return []
     
     # Customize the search query for your emails
     print("Searching for emails...")
@@ -156,11 +138,7 @@ def get_chase_expenses() -> ChaseExpenseResponse:
     emails = search_emails(service, query)
     if not emails:
         print("No emails found.")
-        return ChaseExpenseResponse(
-            status=ResponseStatusEnum.FAILURE,
-            message="No emails found.",
-            data=[]
-        )
+        return []
     
     chase_expenses = []
     for email in emails:
@@ -172,12 +150,32 @@ def get_chase_expenses() -> ChaseExpenseResponse:
             #delete_email(service, email['id'])
             chase_expenses.append(info)
 
-    return ChaseExpenseResponse(
-        status=ResponseStatusEnum.SUCCESS,
-        message="Chase expenses retrieved successfully",
-        data=chase_expenses
-    )
+    print(f"Found {len(chase_expenses)} Chase expenses.")
+    return chase_expenses
 
+def get_latest_unread_emails(_=None) -> List[str]:
+    print("Authenticating with Gmail API...")
+    service = get_gmail_client()
+    if not service:
+        print("Failed to authenticate with Gmail API")
+        return []
+    
+    # Customize the search query for your emails
+    print("Searching for emails...")
+    # search for unread emails today
+    query = 'newer_than:1d is:unread'
+    emails = search_emails(service, query)
+    if not emails:
+        print("No emails found.")
+        return []
+    
+    emails = []
+    for email in emails:
+        content = get_email_content(service, email['id'])
+        if content:
+            emails.append(parse_html_email(content))
+
+    return emails
 
 if __name__ == "__main__":
     print("Fetching Chase expenses...")

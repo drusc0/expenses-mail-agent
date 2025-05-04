@@ -1,28 +1,12 @@
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.tools import tool
-from langchain.agents import initialize_agent, AgentType
-from langchain.tools import Tool
-from langchain_core.runnables import Runnable
 from langchain_core.messages import HumanMessage
-from langchain_core.output_parsers import StrOutputParser
-from pydantic import BaseModel
+from langchain_core.runnables import RunnableLambda
+from collections import defaultdict
+from datetime import datetime
 from typing import List
 
 from src.core.settings import settings
-from src.models.email_models import ChaseExpenseResponse
-from src.email.gmail import (
-    get_gmail_client,
-    search_emails,
-    get_email_content,
-    get_chase_expenses
-)
-
-class Email(BaseModel):
-    """Model for email."""
-    subject: str
-    sender: str
-    date: str
-    body: str
+from src.models.email_models import ChaseExpense, ExpenseSummary
 
 
 def get_google_genai_client() -> ChatGoogleGenerativeAI:
@@ -36,72 +20,78 @@ def get_google_genai_client() -> ChatGoogleGenerativeAI:
         api_key=settings.GOOGLE_GEMINI_TOKEN,
     )
 
-@tool(description="Get the latest email from Gmail for the last 24 hours and not yet seen.",)
-def get_latest_email() -> List[dict]:
-    """Get the latest email from Gmail for the last 24 hours and not yet seen."""
-    service = get_gmail_client()
-    if not service:
-        return []
 
-    query = "newer_than:1d is:unread"
-    messages = search_emails(service, query)
-    if not messages:
-        return []
-
-    email_list = []
-    for message in messages:
-        message_id = message['id']
-        email_content = get_email_content(service, message_id)
-        if email_content:
-            subject = message['payload']['headers'][0]['value']
-            sender = message['payload']['headers'][1]['value']
-            date = message['payload']['headers'][2]['value']
-            email_list.append({
-                "subject": subject,
-                "sender": sender,
-                "date": date,
-                "body": email_content
-            })
-    return email_list
-
-@tool(description="Get the chase expense from the email.")
-def get_chase_expense() -> ChaseExpenseResponse:
-    """Get the chase expense from the email."""
-    return get_chase_expenses()
-    
-
-    
-if __name__ == "__main__":
-    # Step 1: Call your tool directly
-
-    # Optional: Call your parsing logic too
-    expenses = get_chase_expenses()
-    if expenses.status == "failure":
-        print("Failed to retrieve expenses.")
-        exit(1)
-    if not expenses.data:
+def get_chase_expenses(_=None) -> List[ChaseExpense]:
+    from src.email.gmail import get_chase_expenses as get_data
+    print("🛠 Getting expenses...")
+    data = get_data(_)
+    if not data:
         print("No expenses found.")
-        exit(1)
+        return []
+    print(f"💰 Expenses: {data}")
+    return data
 
-    expense_data = [
-        {
-            "account": expense.account,
-            "date": expense.date.strftime("%Y-%m-%d"),
-            "merchant": expense.merchant,
-            "amount": expense.amount
-        }
-        for expense in expenses.data
-    ]
-    # Step 2: Build context for the LLM manually
-    context = "\n".join(
-        [f"{expense['date']} - {expense['merchant']}: {expense['amount']}" for expense in expense_data]
+
+def summarize_expenses_by_month(expenses: List[ChaseExpense]) -> ExpenseSummary:
+    """
+    Summarize Chase expenses by month. Outputs total and monthly breakdown.
+    """
+    print("🛠 Summarizing expenses... ")
+    print(f"💰 Expenses received: {len(expenses)}")
+    if not expenses:
+        raise ValueError("Expected a non-empty list of expense records.")
+    
+    # Initialize a dictionary to hold monthly totals
+    monthly_totals = defaultdict(float)
+    total = 0.0
+    for expense in expenses:
+        try:
+            date_obj = datetime.strptime(expense.date.split(" at ")[0], "%b %d, %Y")
+            month_str = date_obj.strftime("%B %Y")
+            amt = expense.amount
+            monthly_totals[month_str] += amt
+            total += amt
+        except Exception as e:
+            print(f"Error processing expense: {expense}")
+            continue  # skip malformed entries
+
+    print(f"💰 Monthly Totals: {monthly_totals}"
+          f"\n💰 Total: {total}")
+    return ExpenseSummary(
+        total=total,
+        monthly_breakdown=monthly_totals
     )
 
-    # Step 3: Send to LLM for summarization or calculation
-    llm = get_google_genai_client()
-    query = f"""Based on the following email messages, how much did I spend? Can you summarize the total amount spent and provide a breakdown per month?\n\n 
-    Only consider Chase credit card expense notifications. Format output as total + breakdown.\n\n{context}
-    """
+    
+def perform_agent_work():
+    runnable_get_expenses = RunnableLambda(get_chase_expenses)
+    runnable_summarize = RunnableLambda(summarize_expenses_by_month)
+    chain = runnable_get_expenses | runnable_summarize
 
-    response = llm.invoke([HumanMessage(content=query)])
-    print(response.content)
+    try:
+        summary = chain.invoke({})
+        print("\n✅ Raw Summary:")
+        print(f"Total: ${summary.total}")
+        for month, amount in summary.monthly_breakdown.items():
+            print(f"{month}: ${amount}")
+
+        # Use Gemini to summarize the totals
+        gemini = get_google_genai_client()
+        user_prompt = f"""
+You are a helpful finance assistant. Given the following expense summary:
+- Total spent: ${summary.total}
+- Monthly breakdown: {summary.monthly_breakdown}
+
+Write a brief summary of spending behavior.
+"""
+        result = gemini.invoke([HumanMessage(content=user_prompt)])
+
+        print("\n🧠 Gemini Summary:")
+        print(result.content)
+
+    except Exception as e:
+        print("\n❌ Error during processing:")
+        print(e)
+
+if __name__ == "__main__":
+    perform_agent_work()
