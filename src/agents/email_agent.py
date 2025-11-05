@@ -21,10 +21,10 @@ def get_google_genai_client() -> ChatGoogleGenerativeAI:
     )
 
 
-def get_chase_expenses(_=None) -> List[ChaseExpense]:
+async def get_chase_expenses(_=None) -> List[ChaseExpense]:
     from src.email.gmail import get_chase_expenses as get_data
     print("🛠 Getting expenses...")
-    data = get_data(_)
+    data = await get_data(_)
     if not data:
         print("No expenses found.")
         return []
@@ -63,13 +63,13 @@ def summarize_expenses_by_month(expenses: List[ChaseExpense]) -> ExpenseSummary:
     )
 
     
-def perform_agent_work():
-    runnable_get_expenses = RunnableLambda(get_chase_expenses)
+async def perform_agent_work():
+    runnable_get_expenses = RunnableLambda(func=lambda x: None, afunc=get_chase_expenses)
     runnable_summarize = RunnableLambda(summarize_expenses_by_month)
     chain = runnable_get_expenses | runnable_summarize
 
     try:
-        summary = chain.invoke({})
+        summary = await chain.ainvoke({})
         print("\n✅ Raw Summary:")
         print(f"Total: ${summary.total}")
         for month, amount in summary.monthly_breakdown.items():
@@ -84,7 +84,7 @@ You are a helpful finance assistant. Given the following expense summary:
 
 Write a brief summary of spending behavior.
 """
-        result = gemini.invoke([HumanMessage(content=user_prompt)])
+        result = await gemini.ainvoke([HumanMessage(content=user_prompt)])
 
         print("\n🧠 Gemini Summary:")
         print(result.content)
@@ -94,4 +94,5 @@ Write a brief summary of spending behavior.
         print(e)
 
 if __name__ == "__main__":
-    perform_agent_work()
+    import asyncio
+    asyncio.run(perform_agent_work())
